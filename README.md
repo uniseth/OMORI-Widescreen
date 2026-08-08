@@ -1,6 +1,6 @@
-================================================================
+
   OMORI WIDESCREEN MOD - Development Preview v0.10.88
-================================================================
+  ------------
 
   STATUS: NOT PLAYABLE. THIS IS A WORK IN PROGRESS.
 
