@@ -158,7 +158,7 @@
 
     var WIDE_W, WIDE_H;
 
-    // Canvas sizing
+    // canvas sizing - pick your resolution and pray
     switch (CFG.mode) {
         case 'small':  WIDE_W = 854;  WIDE_H = 480; break;
         case 'medium': WIDE_W = 1024; WIDE_H = 576; break;
@@ -391,7 +391,7 @@
                Math.abs(height - BASE_H) <= FULLSCREEN_TOLERANCE;
     }
 
-    // Picture fitting
+    // picture fitting - stretches fullscreen pics to cover the widescreen canvas
     function _fitSpriteToScreen(sprite, frameW, frameH, overscan) {
         if (overscan === undefined) overscan = 1;
         var scale = BASE_FIT * overscan;
@@ -589,21 +589,42 @@
                 picture._scaleX === picture._scaleY &&
                 picture._scaleX >= 100;
 
+            // origin 1 (center anchor) pics - these need to be re-centered for widescreen
+            // catches two patterns:
+            //   - centered on the 640x480 canvas (pos near 320,240) like overlays
+            //   - positioned at 0,0 like transition effects (origin-1 means sprite center is at 0,0)
             var isCenteredOrigin =
-                _looksLikeFullScreenFrame(frameW, frameH) &&
                 picture._origin === 1 &&
                 picture._scaleX === picture._scaleY &&
-                picture._scaleX >= 100 &&
-                Math.abs(picture._x - BASE_W / 2) <= 16 &&
-                Math.abs(picture._y - BASE_H / 2) <= 16;
+                picture._scaleX >= 100 && (
+                    (_looksLikeFullScreenFrame(frameW, frameH) &&
+                     Math.abs(picture._x - BASE_W / 2) <= 16 &&
+                     Math.abs(picture._y - BASE_H / 2) <= 16) ||
+                    (picture._x === 0 && picture._y === 0)
+                );
 
-            if (!isTopLeftOrigin && !isCenteredOrigin) { _destroyEdgeExtrusion(sprite); continue; }
+            if (!isTopLeftOrigin && !isCenteredOrigin) { _destroyEdgeExtrusion(sprite); sprite._wsFittedName = null; continue; }
 
-            _fitSpriteToScreen(sprite, frameW, frameH, picture._scaleX / 100);
-
-            if (isCenteredOrigin) {
-                sprite.x = Math.floor(WIDE_W / 2);
-                sprite.y = Math.floor(WIDE_H / 2);
+            // only fit once per picture name so we dont overwrite position every frame
+            // (otherwise "Move Picture" commands get immediately reverted next frame)
+            // re-fit if the picture changes (new image in the same slot)
+            var picName = picture._name || '';
+            if (sprite._wsFittedName !== picName) {
+                if (isCenteredOrigin && picture._x === 0 && picture._y === 0) {
+                    // origin-1 pics at (0,0) - scale to cover and center
+                    var coverScale = Math.max(WIDE_W / frameW, WIDE_H / frameH);
+                    sprite.scale.x = coverScale;
+                    sprite.scale.y = coverScale;
+                    sprite.x = Math.floor(WIDE_W / 2);
+                    sprite.y = Math.floor(WIDE_H / 2);
+                } else {
+                    _fitSpriteToScreen(sprite, frameW, frameH, picture._scaleX / 100);
+                    if (isCenteredOrigin) {
+                        sprite.x = Math.floor(WIDE_W / 2);
+                        sprite.y = Math.floor(WIDE_H / 2);
+                    }
+                }
+                sprite._wsFittedName = picName;
             }
         }
     }
@@ -647,7 +668,7 @@
         }
     };
 
-    // Drop animation
+    // drop animation - makes events fall from the sky with bounce and spin
     function _dropAnimOpts(opts) {
 
         opts = opts || {};
@@ -824,7 +845,7 @@
         }
         return false;
     }
-
+        // landing SE sync - intercepts thud sounds and re-times them to the actual landing
     function _hookAudioManagerForLandingSe() {
         if (typeof AudioManager === 'undefined' || !AudioManager.playSe) return;
         if (AudioManager.__wsDropSeHooked) return;
@@ -1383,7 +1404,7 @@
 
     _hookAudioManagerForLandingSe();
 
-    // Message and menu hooks
+    // message and menu hooks - repositions dialogue boxes, choice menus, name plates etc
     function _maybeOverrideMessageData(key, data) {
         if (!data || !CFG.messageTextOverrides) return data;
         var override = CFG.messageTextOverrides[key];
@@ -2743,6 +2764,7 @@
         return CFG.faceAnchorMirror ? shift : -shift;
     }
     function _getMessageBoxWidth() {
+        // force actual vanilla width (360px) in battle - the mod widens it outside battle but it looks weird in combat
         if (typeof Scene_Battle !== 'undefined' &&
             SceneManager._scene instanceof Scene_Battle) {
             return 360;
@@ -3938,7 +3960,7 @@
         }
     };
 
-    // Debug overlay
+    // debug overlay - toggle with ws.toggleGuides(), shows colored boxes over everything
     var _debugOverlayVisible = false;
     var _debugOverlaySprite = null;
     var _debugInfoSprite = null;
@@ -5672,6 +5694,11 @@
 })();
 
 
+
+
+// =============================================================================
+// battle background offset/scale - lets you manually tweak BG position and scale per-axis
+// =============================================================================
 (function() {
     'use strict';
 
@@ -5730,7 +5757,7 @@
         };
     }
 
-    // Console API
+    // console API - ws.setBattleBgOffset, ws.setBattleBgScale, ws.battleBgStatus
     if (!window.ws) window.ws = {};
     window.ws.setBattleBgOffset = function(x, y) {
         if (x !== undefined) CFG.battleBgOffsetX = Number(x) || 0;
@@ -5751,7 +5778,9 @@
     console.log('[Widescreen] battle BG offset/scale module loaded.');
 })();
 
-
+// =============================================================================
+// center battle UI - shifts status, commands, stress bar etc to the middle of the screen
+// =============================================================================
 (function() {
     'use strict';
 
@@ -5774,6 +5803,8 @@
         for (var i = 0; i < KEYS.length; i++) {
             var obj = scene[KEYS[i]];
             if (!obj) continue;
+            // record the original x once so we always shift from omori's intended value
+            // (otherwise our shift compounds with itself every frame and everything drifts)
             if (obj._wsClusterBaseX === undefined) obj._wsClusterBaseX = obj.x;
             var targetX = obj._wsClusterBaseX + dx;
             if (obj.x !== targetX) obj.x = targetX;
@@ -5786,6 +5817,8 @@
         centerBattleCluster(this);
     };
 
+    // per-frame X pin - only shifts X so vertical slide animations still work
+    // (command windows / stress bar sliding in and out are unaffected)
     var _wsCC_update = Scene_Battle.prototype.update;
     Scene_Battle.prototype.update = function() {
         _wsCC_update.apply(this, arguments);
@@ -5825,6 +5858,8 @@
         });
     };
 
+    // dump every visible battle element with its screen position + size
+    // so we can figure out which box is the one thats looking weird
     ensureWs().listBattleElements = function() {
         var s = SceneManager._scene;
         if (!(s instanceof Scene_Battle)) { console.log('[ws] not in battle'); return; }
@@ -5873,6 +5908,7 @@
     if (typeof Scene_Battle === 'undefined') return;
 
     var FACE_W = 114;
+    // vanilla (640) column geometry: left col x=174, right col x=352
     var VANILLA_LEFT_X  = 174;
     var VANILLA_RIGHT_X = 352;
     var VANILLA_GAP     = VANILLA_RIGHT_X - VANILLA_LEFT_X;   // 178
@@ -5886,6 +5922,7 @@
         return v;
     }
 
+    // target x for a column with vanilla spacing, centered on canvas
     function centeredColumnX(col /* 0=left,1=right */) {
         var leftX = Math.floor((Graphics.width - VANILLA_PAIR_W) / 2);
         return (col === 0) ? leftX : leftX + VANILLA_GAP;
